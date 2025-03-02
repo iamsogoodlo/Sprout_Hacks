@@ -1,5 +1,7 @@
-import random
 import streamlit as st
+st.set_page_config(page_title="Ontario Energy Dashboard", layout="wide")
+
+import random
 import numpy as np
 import pandas as pd
 import torch
@@ -16,13 +18,126 @@ import os
 import tempfile
 import seaborn as sns  # Import seaborn for heatmap
 
-# Configure the page layout
-st.set_page_config(page_title="Ontario Energy Dashboard", layout="wide")
+###############################################################################
+# CUSTOM STYLING: LIGHT FARMLAND-STYLE BACKGROUND, CENTERED CONTENT, AND SIDEBAR ENLARGEMENT
+###############################################################################
+st.markdown(
+    """
+    <style>
+    /* Main container: white to light green gradient background */
+    .reportview-container, .main .block-container {
+        background: linear-gradient(135deg, #ffffff, #e8f5e9) no-repeat center center fixed;
+        background-size: cover;
+    }
+    /* Semi-transparent container for better readability */
+    .block-container {
+        backdrop-filter: blur(6px);
+        background-color: rgba(255, 255, 255, 0.7);
+        border-radius: 12px;
+        padding: 2rem;
+        margin-top: 2rem;
+    }
+    /* Center headings */
+    h2, h3, h4, h5 {
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    /* Styling for question text */
+    .question-text {
+        font-size: 1.2rem;
+        font-weight: 600;
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    /* Container for sliders and buttons: limit width to 65% and center */
+    .slider-container {
+        width: 65%;
+        margin-left: auto;
+        margin-right: auto;
+        text-align: center;
+    }
+    /* Center class for generic centering */
+    .center {
+        text-align: center;
+    }
+    /* Make dataframes centered */
+    div[data-testid="stDataFrameContainer"] {
+        margin: 0 auto;
+    }
+    /* Increase sidebar navigation radio elements' size and spacing */
+    [data-testid="stSidebar"] .css-1d391kg,
+    [data-testid="stSidebar"] .stRadio {
+        font-size: 1.5rem !important;
+        padding: 1rem 0 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 ###############################################################################
-# SIMPLE PAGE NAVIGATION VIA SIDEBAR RADIO
+# ADD AUDIO ELEMENT AND JS FUNCTION FOR CLICK SOUND
 ###############################################################################
-page = st.sidebar.radio("Go to", ["Overview", "User Input"])
+st.components.v1.html(
+    """
+    <audio id="clickSound" src="https://actions.google.com/sounds/v1/cartoon/pop.ogg"></audio>
+    <script>
+    function playClickSound(){
+        document.getElementById("clickSound").play();
+    }
+    </script>
+    """,
+    height=0
+)
+
+def play_click_sound():
+    st.components.v1.html(
+        """
+        <script>
+        playClickSound();
+        </script>
+        """,
+        height=0
+    )
+
+###############################################################################
+# LOGO CREATION FUNCTION
+###############################################################################
+def create_logo():
+    fig, ax = plt.subplots(figsize=(4, 4))
+    ax.axis("off")
+    
+    # Draw a green circle as background
+    circle = plt.Circle((0.5, 0.5), 0.4, color='#4CAF50', zorder=1)
+    ax.add_artist(circle)
+    
+    # Draw a stylized leaf (lighter green)
+    leaf_points = [
+        (0.5, 0.68),
+        (0.45, 0.55),
+        (0.5, 0.42),
+        (0.55, 0.55)
+    ]
+    leaf = plt.Polygon(leaf_points, closed=True, color='#8BC34A', zorder=2)
+    ax.add_artist(leaf)
+    
+    # Add project initials ("OED") in white
+    ax.text(0.5, 0.28, "OED", fontsize=24, fontweight='bold',
+            color='white', ha='center', va='center', zorder=3)
+    
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', transparent=True, bbox_inches='tight')
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+
+###############################################################################
+# SIDEBAR NAVIGATION (Overview, User Input, User History, Suggestions)
+###############################################################################
+page = st.sidebar.radio("Go to", ["Overview", "User Input", "User History", "Suggestions"])
 
 ###############################################################################
 # TRAIN REGRESSION MODEL TO LEARN CONVERSION FACTORS
@@ -75,7 +190,6 @@ def optimize_carbon_footprint(consumption_limits, conversion_factors):
     generations = 100
     mutation_rate = 0.1
 
-    # Random initialization of population
     population = [
         [random.uniform(consumption_limits[i][0], consumption_limits[i][1]) for i in range(len(consumption_limits))]
         for _ in range(population_size)
@@ -85,7 +199,7 @@ def optimize_carbon_footprint(consumption_limits, conversion_factors):
         return sum(consumption[i] * conversion_factors[i] for i in range(len(consumption)))
 
     def fitness(consumption):
-        return 1 / (1 + calculate_emissions(consumption))  # Higher fitness for lower emissions
+        return 1 / (1 + calculate_emissions(consumption))
 
     def mutate(consumption):
         i = random.randint(0, len(consumption) - 1)
@@ -98,18 +212,12 @@ def optimize_carbon_footprint(consumption_limits, conversion_factors):
 
     for generation in range(generations):
         population.sort(key=lambda x: fitness(x), reverse=True)
-        
-        # Selection: top 50% of population
         selected = population[:population_size // 2]
-        
-        # Crossover: breed the top selections
         next_generation = selected.copy()
         while len(next_generation) < population_size:
             parent1, parent2 = random.sample(selected, 2)
             child = crossover(parent1, parent2)
             next_generation.append(child)
-
-        # Mutation: introduce small changes
         population = [mutate(ind) if random.random() < mutation_rate else ind for ind in next_generation]
 
     best_solution = population[0]
@@ -129,34 +237,24 @@ def load_lottieurl(url: str):
 ###############################################################################
 def generate_pca_animation():
     try:
-        # Load dataset and extract energy consumption features
         df = pd.read_csv("carbon_emissions_large.csv")
         features = ["Electricity", "Natural Gas", "Vehicle", "Heating Oil", "Propane"]
         X_np = df[features].values.astype(np.float32)
         y_np = df["Total_Emissions"].values.astype(np.float32)
         
-        # Convert to torch tensor and center the data
         X = torch.tensor(X_np)
         X_centered = X - X.mean(dim=0, keepdim=True)
         
-        # Compute covariance matrix (unbiased estimator)
         cov_matrix = torch.matmul(X_centered.t(), X_centered) / (X_centered.shape[0] - 1)
         
-        # Compute eigenvalues and eigenvectors using eigh (for symmetric matrices)
         eigenvalues, eigenvectors = torch.linalg.eigh(cov_matrix)
-        
-        # Sort eigenvalues and eigenvectors in descending order
         sorted_indices = torch.argsort(eigenvalues, descending=True)
         eigenvectors = eigenvectors[:, sorted_indices]
         
-        # Select top 2 principal components
         pcs = eigenvectors[:, :2]
-        
-        # Project centered data onto the top 2 PCs
         X_pca = torch.matmul(X_centered, pcs)
-        X_pca_np = X_pca.numpy()  # Shape: (n_samples, 2)
+        X_pca_np = X_pca.numpy()
         
-        # Create 3D scatter plot: PC1 vs PC2, Total Emissions as z-axis
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         sc = ax.scatter(X_pca_np[:, 0], X_pca_np[:, 1], y_np, c=y_np, cmap="viridis")
@@ -165,7 +263,6 @@ def generate_pca_animation():
         ax.set_zlabel("Total Emissions")
         fig.colorbar(sc, ax=ax, label="Total Emissions")
         
-        # Animation: rotate view (azimuth from 0 to 360 degrees)
         def update(frame):
             ax.view_init(elev=30, azim=frame)
             return fig,
@@ -189,18 +286,16 @@ def generate_pca_animation():
         return None
 
 ###############################################################################
-# HEATMAP DISPLAY OF ENERGY CONSUMPTION AND EMISSIONS (WITH SCIENTIFIC NOTATION)
+# HEATMAP DISPLAY OF ENERGY CONSUMPTION AND EMISSIONS
 ###############################################################################
 def show_heatmap():
-    # Example heatmap data (can be modified with real data)
     regions = ["North", "South", "East", "West"]
     energy_types = ["Electricity", "Natural Gas", "Vehicle", "Heating Oil", "Propane"]
-    
-    # Generating some random data for demonstration
-    emissions_data = np.random.rand(len(regions), len(energy_types)) * 10000  # Randomized data in thousands
+    emissions_data = np.random.rand(len(regions), len(energy_types)) * 10000
     
     fig, ax = plt.subplots(figsize=(10, 8))
-    sns.heatmap(emissions_data, annot=True, fmt='.2e', cmap='YlGnBu', xticklabels=energy_types, yticklabels=regions, ax=ax)
+    sns.heatmap(emissions_data, annot=True, fmt='.2e', cmap='YlGnBu', 
+                xticklabels=energy_types, yticklabels=regions, ax=ax)
     ax.set_title("Energy Consumption vs Emissions by Region and Energy Type")
     st.pyplot(fig)
 
@@ -208,32 +303,28 @@ def show_heatmap():
 # OVERVIEW PAGE
 ###############################################################################
 def show_overview_page():
+    logo_buf = create_logo()
+    st.image(logo_buf, width=100)
+    
     st.title("Overview: Carbon Footprint Factors & Statistical Methodology")
     
-    # 1) Time Series Analysis
+    st.markdown("## Your Estimated Emissions")
+    user_total = st.session_state.get("total_carbon", None)
+    if user_total is None:
+        st.write("You haven't calculated your personal emissions yet. **Please select 'User Input' from the left sidebar** to start your calculation.")
+    else:
+        st.markdown(f"<div class='center'>Your Estimated Emissions (kg CO₂): <strong>{user_total:.2f}</strong></div>", unsafe_allow_html=True)
+    
     st.markdown("## Time Series Analysis")
     dates = pd.date_range(start='2020-01-01', periods=36, freq='M')
     consumption = np.random.normal(500, 50, len(dates))
     df_timeseries = pd.DataFrame({'Month': dates, 'Energy Consumption (kWh)': consumption})
     st.line_chart(df_timeseries.set_index('Month'))
     
-    # 2) Emissions Breakdown Pie Chart (percentages in legend)
     st.markdown("## Emissions Breakdown")
-    sample_values = {
-        "Electricity": 500,
-        "Natural Gas": 50,
-        "Vehicle": 1000,
-        "Heating Oil": 20,
-        "Propane": 10
-    }
+    sample_values = {"Electricity": 500, "Natural Gas": 50, "Vehicle": 1000, "Heating Oil": 20, "Propane": 10}
     conv = st.session_state.conversion_factors
-    sample_emissions = {
-        "Electricity": sample_values["Electricity"] * conv["Electricity"],
-        "Natural Gas": sample_values["Natural Gas"] * conv["Natural Gas"],
-        "Vehicle": sample_values["Vehicle"] * conv["Vehicle"],
-        "Heating Oil": sample_values["Heating Oil"] * conv["Heating Oil"],
-        "Propane": sample_values["Propane"] * conv["Propane"]
-    }
+    sample_emissions = { key: sample_values[key] * conv[key] for key in sample_values }
     breakdown_df = pd.DataFrame({
         "Source": list(sample_emissions.keys()),
         "Emissions": list(sample_emissions.values())
@@ -242,30 +333,16 @@ def show_overview_page():
     breakdown_df["Percent"] = breakdown_df["Emissions"] / total_emissions * 100
 
     fig, ax = plt.subplots()
-    wedges, texts = ax.pie(
-        breakdown_df["Emissions"],
-        startangle=90,
-        textprops={'fontsize': 8}
-    )
+    wedges, texts = ax.pie(breakdown_df["Emissions"], startangle=90, textprops={'fontsize': 8})
     ax.axis('equal')
     ax.set_title("Emissions Breakdown (Ascending Order)")
     legend_labels = breakdown_df.apply(lambda row: f"{row['Source']} - {row['Percent']:.1f}%", axis=1).tolist()
     ax.legend(wedges, legend_labels, title="Source", loc="center left", bbox_to_anchor=(1, 0, 0.3, 1))
     st.pyplot(fig)
-
-    # 3) Show the heatmap
+    
     st.markdown("## Energy Consumption vs Emissions Heatmap")
     show_heatmap()
-
-    # 5) Your Estimated Emissions
-    st.markdown("## Your Estimated Emissions")
-    user_total = st.session_state.get("total_carbon", None)
-    if user_total is None:
-        st.write("You haven't calculated your personal emissions yet. **Please select 'User Input' from the left sidebar** to calculate your emissions.")
-    else:
-        st.write(f"Your Estimated Emissions (kg CO₂): **{user_total:.2f}**")
     
-    # 6) Benchmarking
     st.markdown("## Benchmarking")
     canada_avg = 1500.00
     if user_total is not None:
@@ -276,53 +353,37 @@ def show_overview_page():
         with col2:
             st.metric("Average in Canada (kg CO₂)", f"{canada_avg:.2f}")
         if diff < 0:
-            st.markdown(f"**Great job!** Your emissions are **{abs(diff):.2f} kg CO₂ lower** than the Canadian average.")
+            st.markdown(f"<div class='center'>**Great job!** Your emissions are <strong>{abs(diff):.2f} kg CO₂ lower</strong> than the Canadian average.</div>", unsafe_allow_html=True)
         else:
-            st.markdown(f"**Attention:** Your emissions are **{diff:.2f} kg CO₂ higher** than the Canadian average.")
+            st.markdown(f"<div class='center'>**Attention:** Your emissions are <strong>{diff:.2f} kg CO₂ higher</strong> than the Canadian average.</div>", unsafe_allow_html=True)
     else:
         st.write("Once you calculate your emissions, you can compare them to the Canadian average here.")
     
-    # 7) Methodology
-    # 4) Genetic Algorithm Overview
     st.markdown("## Overview of Methodology")
     st.markdown("## Genetic Algorithm for Optimization")
     st.markdown(
         """
-        The **Genetic Algorithm** (GA) is used to optimize the energy consumption pattern by simulating the process of natural selection. 
+        The **Genetic Algorithm** (GA) is used to optimize the energy consumption pattern by simulating natural selection. 
         It creates a population of possible energy consumption combinations, evaluates their fitness (carbon emissions), and iteratively improves 
         the solutions through selection, crossover, and mutation.
-        
-        The **Genetic Algorithm** process is as follows:
-        1. **Population Initialization**: A random set of consumption levels is generated.
-        2. **Fitness Evaluation**: The fitness of each individual (set of consumption levels) is evaluated by calculating its emissions.
-        3. **Selection**: The fittest individuals are selected for reproduction.
-        4. **Crossover**: Pairs of individuals are combined to create new individuals.
-        5. **Mutation**: A small mutation is applied to some individuals to introduce diversity.
-
-        The algorithm runs for a set number of generations, evolving a solution that minimizes carbon emissions.
         """
     )
     st.markdown("### Regression Analysis:")
     st.markdown(r"We used a multiple linear regression model of the form:")
     st.latex(r"Y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \cdots + \beta_n x_n + \varepsilon")
-    st.markdown(r"where \(Y\) is the total emissions, \(x_i\) are the consumption measures, and \(\beta_i\) are the conversion factors.")
     st.markdown("### Gradient Descent Optimization:")
     st.markdown(r"To minimize the Mean Squared Error (MSE), we used gradient descent. The cost function is:")
     st.latex(r"J(\beta) = \frac{1}{2n} \sum_{i=1}^{n} \left( y_i - x_i^T \beta \right)^2")
-    st.markdown("and the gradient descent update rule is:")
-    st.latex(r"\beta := \beta - \alpha \frac{\partial J}{\partial \beta}")
     st.markdown("### Outlier Removal:")
-    st.markdown(r"Prior to regression, outliers are removed using the Interquartile Range (IQR) method:")
+    st.markdown(r"Outliers are removed using the Interquartile Range (IQR) method:")
     st.latex(r"\text{Lower Bound} = Q1 - 1.5 \times (Q3 - Q1), \quad \text{Upper Bound} = Q3 + 1.5 \times (Q3 - Q1)")
-
-    # 8) Animated 3D Graph: Key Energy Drivers of Carbon Emissions
+    
     st.markdown("## Key Energy Drivers of Carbon Emissions")
     st.markdown(
         """
-        The animated 3D graph below shows how we identified the key energy drivers impacting total carbon emissions.  
-        We used PyTorch to perform PCA on the five energy consumption features by first centering the data and computing its covariance matrix.  
-        The eigen-decomposition revealed that the first two principal components capture the most variance in the data.  
-        These two components are used as proxies for the most influential energy consumption parameters, while the z-axis represents Total Emissions.
+        The animated 3D graph below shows how we identified key energy drivers impacting total carbon emissions.  
+        We used PyTorch to perform PCA on five energy consumption features. The first two principal components capture the most variance, 
+        while the z-axis represents Total Emissions.
         """
     )
     gif_pca = generate_pca_animation()
@@ -330,95 +391,179 @@ def show_overview_page():
         st.image(gif_pca, caption="Key Energy Drivers of Carbon Emissions", use_container_width=True)
 
 ###############################################################################
-# USER INPUT PAGE
+# SUGGESTIONS PAGE (Centered Content Using Provided Gemini Snippet)
 ###############################################################################
-def show_user_input_page():
-    st.title("Carbon Footprint Calculator")
-    st.markdown("Please select the consumption levels for each category below. Each option represents a typical amount:")
-
-    # Electricity
-    st.subheader("Electricity Consumption")
-    elec_choice = st.radio("Electricity Level", options=["Low (300 kWh)", "Medium (500 kWh)", "High (700 kWh)"])
-    electricity_val = 300.0 if elec_choice == "Low (300 kWh)" else 500.0 if elec_choice == "Medium (500 kWh)" else 700.0
-
-    # Natural Gas
-    st.subheader("Natural Gas Consumption")
-    gas_choice = st.radio("Natural Gas Level", options=["Low (30 therms)", "Medium (50 therms)", "High (80 therms)"])
-    gas_val = 30.0 if gas_choice == "Low (30 therms)" else 50.0 if gas_choice == "Medium (50 therms)" else 80.0
-
-    # Vehicle Miles
-    st.subheader("Vehicle Miles Driven")
-    vehicle_choice = st.radio("Vehicle Miles Level", options=["Low (500 miles)", "Medium (1000 miles)", "High (1500 miles)"])
-    vehicle_val = 500.0 if vehicle_choice == "Low (500 miles)" else 1000.0 if vehicle_choice == "Medium (1000 miles)" else 1500.0
-
-    # Heating Oil
-    st.subheader("Heating Oil Consumption")
-    oil_choice = st.radio("Heating Oil Level", options=["Low (10 gallons)", "Medium (20 gallons)", "High (30 gallons)"])
-    oil_val = 10.0 if oil_choice == "Low (10 gallons)" else 20.0 if oil_choice == "Medium (20 gallons)" else 30.0
-
-    # Propane
-    st.subheader("Propane Consumption")
-    propane_choice = st.radio("Propane Level", options=["Low (5 gallons)", "Medium (10 gallons)", "High (15 gallons)"])
-    propane_val = 5.0 if propane_choice == "Low (5 gallons)" else 10.0 if propane_choice == "Medium (10 gallons)" else 15.0
-
-    st.markdown("### Review Your Selections")
-    st.write(f"**Electricity:** {electricity_val} kWh")
-    st.write(f"**Natural Gas:** {gas_val} therms")
-    st.write(f"**Vehicle Miles:** {vehicle_val} miles")
-    st.write(f"**Heating Oil:** {oil_val} gallons")
-    st.write(f"**Propane:** {propane_val} gallons")
-
-    if "total_carbon" not in st.session_state:
-        st.session_state.total_carbon = None
-
-    carbon_placeholder = st.empty()
-
-    calc_button = st.button("Calculate Carbon Footprint")
-    if calc_button:
-        with st.spinner("Calculating your carbon footprint..."):
-            conv = st.session_state.conversion_factors
-            carbon_elec = electricity_val * conv["Electricity"]
-            carbon_gas = gas_val * conv["Natural Gas"]
-            carbon_vehicle = vehicle_val * conv["Vehicle"]
-            carbon_oil = oil_val * conv["Heating Oil"]
-            carbon_propane = propane_val * conv["Propane"]
-
-            total_carbon = carbon_elec + carbon_gas + carbon_vehicle + carbon_oil + carbon_propane
-            st.session_state.total_carbon = total_carbon
-            carbon_placeholder.success(f"**Estimated Monthly Carbon Emissions:** {total_carbon:.2f} kg CO₂")
-
-    get_recs = st.button("Get Sustainability Recommendations")
-    if get_recs:
-        if st.session_state.total_carbon is None:
+def show_suggestions_page():
+    st.markdown("<div class='center'>", unsafe_allow_html=True)
+    st.title("Carbon Emission Improvement Suggestions")
+    st.write("Click the button below to fetch actionable, friendly recommendations on how to lower your carbon emissions based on your current consumption data.")
+    
+    if st.button("Get Suggestions"):
+        if "total_carbon" not in st.session_state or st.session_state.total_carbon is None:
             st.error("Please calculate your carbon footprint first!")
         else:
-            # Create a placeholder for the spinner and suggestions
             spinner_placeholder = st.empty()
             suggestion_placeholder = st.empty()
             spinner_placeholder.image("leaf_spinner.gif", caption="Suggesting...", use_container_width=160)
+            
             prompt = (
                 f"I'm a sustainability expert. A user has a monthly carbon footprint of {st.session_state.total_carbon:.2f} kg CO₂. "
-                f"They consume {electricity_val} kWh of electricity, {gas_val} therms of natural gas, drive {vehicle_val} miles, "
-                f"use {oil_val} gallons of heating oil, and {propane_val} gallons of propane each month. "
+                f"They consume {st.session_state.get('electricity_val', 0)} kWh of electricity, {st.session_state.get('gas_val', 0)} therms of natural gas, "
+                f"drive {st.session_state.get('vehicle_val', 0)} miles, use {st.session_state.get('oil_val', 0)} gallons of heating oil, "
+                f"and {st.session_state.get('propane_val', 0)} gallons of propane each month. "
                 f"Provide actionable, friendly recommendations to lower their carbon emissions."
             )
-            client = genai.Client(api_key="AIzaSyB4VHerf7dMxw35V6TS8tru3E_i7_wkLVU")
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=[prompt]
-            )
-            # Remove the spinner after the response is received
-            spinner_placeholder.empty()
-            suggestion_placeholder.success(response.text)
+            try:
+                client = genai.Client(api_key="AIzaSyB4VHerf7dMxw35V6TS8tru3E_i7_wkLVU")
+                response = client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=[prompt]
+                )
+                spinner_placeholder.empty()
+                suggestion_placeholder.success(response.text)
+            except Exception as e:
+                spinner_placeholder.empty()
+                st.error("Error fetching suggestions: " + str(e))
+    st.markdown("</div>", unsafe_allow_html=True)
 
 ###############################################################################
-# MAIN
+# MULTI-STEP USER INPUT PAGE WITH SLIDERS (USING CALLBACKS)
 ###############################################################################
+def set_step(new_step):
+    st.session_state.input_step = new_step
+
+def reset_calculation():
+    for key in ["input_step", "electricity_val", "gas_val", "vehicle_val", "oil_val", "propane_val"]:
+        st.session_state.pop(key, None)
+
+def show_user_input_page():
+    if "input_step" not in st.session_state:
+        st.session_state.input_step = 1
+
+    if st.session_state.input_step == 1:
+        st.title("Welcome to Your Carbon Footprint Calculator")
+        st.write("This interactive notebook will guide you through a series of steps to estimate your monthly carbon emissions.")
+        st.button("Start", key="start", on_click=set_step, args=(2,))
+    elif st.session_state.input_step == 2:
+        with st.container():
+            st.markdown("<div class='slider-container'>", unsafe_allow_html=True)
+            st.markdown("<h2>Electricity Consumption</h2>", unsafe_allow_html=True)
+            st.markdown("<p class='question-text'>How many kWh of electricity do you use monthly?</p>", unsafe_allow_html=True)
+            elec_val = st.slider("Electricity (kWh)", min_value=300, max_value=700, value=500, step=1, key="elec_slider")
+            st.session_state.electricity_val = float(elec_val)
+            col1, col2, col3 = st.columns([1,8,1])
+            with col1:
+                st.button("Back", key="back_elec", on_click=set_step, args=(1,))
+            with col3:
+                st.button("Next", key="next_elec", on_click=set_step, args=(3,))
+            st.markdown("</div>", unsafe_allow_html=True)
+    elif st.session_state.input_step == 3:
+        with st.container():
+            st.markdown("<div class='slider-container'>", unsafe_allow_html=True)
+            st.markdown("<h2>Natural Gas Consumption</h2>", unsafe_allow_html=True)
+            st.markdown("<p class='question-text'>How many therms of natural gas do you use monthly?</p>", unsafe_allow_html=True)
+            gas_val = st.slider("Natural Gas (therms)", min_value=30, max_value=80, value=50, step=1, key="gas_slider")
+            st.session_state.gas_val = float(gas_val)
+            col1, col2, col3 = st.columns([1,8,1])
+            with col1:
+                st.button("Back", key="back_gas", on_click=set_step, args=(2,))
+            with col3:
+                st.button("Next", key="next_gas", on_click=set_step, args=(4,))
+            st.markdown("</div>", unsafe_allow_html=True)
+    elif st.session_state.input_step == 4:
+        with st.container():
+            st.markdown("<div class='slider-container'>", unsafe_allow_html=True)
+            st.markdown("<h2>Vehicle Miles Driven</h2>", unsafe_allow_html=True)
+            st.markdown("<p class='question-text'>How many miles do you drive monthly?</p>", unsafe_allow_html=True)
+            vehicle_val = st.slider("Vehicle Miles", min_value=500, max_value=1500, value=1000, step=1, key="vehicle_slider")
+            st.session_state.vehicle_val = float(vehicle_val)
+            col1, col2, col3 = st.columns([1,8,1])
+            with col1:
+                st.button("Back", key="back_vehicle", on_click=set_step, args=(3,))
+            with col3:
+                st.button("Next", key="next_vehicle", on_click=set_step, args=(5,))
+            st.markdown("</div>", unsafe_allow_html=True)
+    elif st.session_state.input_step == 5:
+        with st.container():
+            st.markdown("<div class='slider-container'>", unsafe_allow_html=True)
+            st.markdown("<h2>Heating Oil Consumption</h2>", unsafe_allow_html=True)
+            st.markdown("<p class='question-text'>How many gallons of heating oil do you use monthly?</p>", unsafe_allow_html=True)
+            oil_val = st.slider("Heating Oil (gallons)", min_value=10, max_value=30, value=20, step=1, key="oil_slider")
+            st.session_state.oil_val = float(oil_val)
+            col1, col2, col3 = st.columns([1,8,1])
+            with col1:
+                st.button("Back", key="back_oil", on_click=set_step, args=(4,))
+            with col3:
+                st.button("Next", key="next_oil", on_click=set_step, args=(6,))
+            st.markdown("</div>", unsafe_allow_html=True)
+    elif st.session_state.input_step == 6:
+        with st.container():
+            st.markdown("<div class='slider-container'>", unsafe_allow_html=True)
+            st.markdown("<h2>Propane Consumption</h2>", unsafe_allow_html=True)
+            st.markdown("<p class='question-text'>How many gallons of propane do you use monthly?</p>", unsafe_allow_html=True)
+            propane_val = st.slider("Propane (gallons)", min_value=5, max_value=15, value=10, step=1, key="propane_slider")
+            st.session_state.propane_val = float(propane_val)
+            col1, col2, col3 = st.columns([1,6,3])
+            with col1:
+                st.button("Back", key="back_propane", on_click=set_step, args=(5,))
+            with col3:
+                st.button("Finish and Calculate", key="finish", on_click=set_step, args=(7,))
+            st.markdown("</div>", unsafe_allow_html=True)
+    elif st.session_state.input_step == 7:
+        with st.container():
+            st.markdown("<div class='center'>", unsafe_allow_html=True)
+            conv = st.session_state.conversion_factors
+            carbon_elec = st.session_state.electricity_val * conv["Electricity"]
+            carbon_gas = st.session_state.gas_val * conv["Natural Gas"]
+            carbon_vehicle = st.session_state.vehicle_val * conv["Vehicle"]
+            carbon_oil = st.session_state.oil_val * conv["Heating Oil"]
+            carbon_propane = st.session_state.propane_val * conv["Propane"]
+            total_carbon = carbon_elec + carbon_gas + carbon_vehicle + carbon_oil + carbon_propane
+            st.markdown(f"<h2>Your Estimated Monthly Carbon Emissions: {total_carbon:.2f} kg CO₂</h2>", unsafe_allow_html=True)
+            st.session_state.total_carbon = total_carbon
+            if "emission_history" not in st.session_state:
+                st.session_state.emission_history = []
+            st.session_state.emission_history.append({
+                "date": pd.Timestamp.now(),
+                "emissions": total_carbon
+            })
+            st.markdown("</div>", unsafe_allow_html=True)
+        col1, col2, col3 = st.columns([1,5,2])
+        with col1:
+            st.button("Back", key="back_results", on_click=set_step, args=(6,))
+        with col3:
+            st.button("Reset Calculation", key="reset", on_click=reset_calculation)
+
+def show_user_history_page():
+    st.title("Your Emissions History")
+    
+    if "emission_history" not in st.session_state or len(st.session_state.emission_history) == 0:
+        st.info("No emissions data tracked yet. Please calculate your carbon footprint on the 'User Input' page.")
+        return
+    
+    # Remove centering wrapper to left-align the content
+    df_history = pd.DataFrame(st.session_state.emission_history)
+    df_history["date"] = pd.to_datetime(df_history["date"])
+    df_history = df_history.sort_values("date")
+    
+    st.subheader("Emissions Over Time")
+    canada_avg = 1500.0
+    df_history["Canada Average"] = canada_avg
+    df_history.set_index("date", inplace=True)
+    st.line_chart(df_history[["emissions", "Canada Average"]])
+    
+    st.subheader("Emissions History Data")
+    st.dataframe(df_history.reset_index())
+
 def main():
     if page == "Overview":
         show_overview_page()
-    else:
+    elif page == "User Input":
         show_user_input_page()
+    elif page == "User History":
+        show_user_history_page()
+    elif page == "Suggestions":
+        show_suggestions_page()
 
 if __name__ == "__main__":
     main()
